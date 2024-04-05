@@ -53,6 +53,16 @@ public static class NetcdfSerializer
             }
             Flatten(varData, varDims, data1D);
         }
+        else if ((targVar.Rank == 1) && (fileTimes == null))
+        {
+            float[] varData = ds.GetData<float[]>(varName);
+            varDims = [1,1,1,varData.Length];
+            Flatten(varData, varDims, data1D);
+        }
+        else
+        {
+            throw new ArgumentException($"Code not in place for a variable of rank {targVar.Rank}");
+        }
         // Shove everything into a single block of bytes:
         // 1 byte:      Flags [currently just 1: whether the time data is included]
         // 24 bytes:    a 12-character name
@@ -80,6 +90,7 @@ public static class NetcdfSerializer
                 }
                 Buffer.BlockCopy(data1D,0,bigBlock,flagBytes + nameBytes + dimBytes + timeBytes,nVals*4);
                 writer.Write(bigBlock);
+                Console.WriteLine($"FIRSTVAL --> {data1D[0]}");
             }
         }
     }
@@ -204,7 +215,7 @@ public static class NetcdfSerializer
         return rank;
     }
 
-    public static (DateTime[], float[,,]) ReadFile2D(string fileName)
+    public static (DateTime[], float[,,]) Deserialize2D(string fileName)
     {
         int[] varDims = new int[4];
         long[] longTimes;
@@ -252,7 +263,7 @@ public static class NetcdfSerializer
         return (timeVec, dataArray);
     }
     
-    public static (DateTime[], float[,,,]) ReadFile3D(string fileName)
+    public static (DateTime[], float[,,,]) Deserialize3D(string fileName)
     {
         int[] varDims = new int[4];
         long[] longTimes;
@@ -282,6 +293,61 @@ public static class NetcdfSerializer
                 // Read in all remaining data
                 reader.Read(memBytes);
                 dataArray = new float[varDims[0],varDims[1],varDims[2],varDims[3]];
+                if (timesPresent)
+                {
+                    Buffer.BlockCopy(memBytes, 0, longTimes, 0, 8 * nTimes);
+                }
+                Buffer.BlockCopy(memBytes,nTimes*8,dataArray,0,4*nValues);
+            }
+        }
+
+        // Convert from longTimes to timeVec
+        DateTime[] timeVec = new DateTime[nTimes];
+        DateTime refTime = new DateTime(1970, 1, 1, 0, 0, 0);
+        for (int i = 0; i < nTimes; i++)
+        {
+            timeVec[i] = refTime + TimeSpan.FromSeconds((double)longTimes[i]);
+        }
+        return (timeVec, dataArray);
+    }
+
+    public static float[] Deserialize1DNoTime(string fileName)
+    {
+        (_, float[,] data2D) = Deserialize1D(fileName);
+        float[] data1D = new float[data2D.Length];
+        Buffer.BlockCopy(data2D,0,data1D,0,data2D.Length * 4);
+        return data1D;
+    }
+    public static (DateTime[], float[,]) Deserialize1D(string fileName)
+    {
+        int[] varDims = new int[4];
+        long[] longTimes;
+        float[,] dataArray;
+        int nTimes;
+        using (var stream = File.Open(fileName, FileMode.Open))
+        {
+            using (var reader = new BinaryReader(stream, Encoding.Unicode))
+            {
+                // Only read the header
+                byte[] memBytes = new byte[1 + (12*2) + (4*4)];
+                reader.Read(memBytes);
+                // Flag byte
+                bool[] flags = ReadFlagsByte(memBytes[0]);
+                bool timesPresent = flags[7];
+                // Skip the variable name - need to get the dimensions to know how far to read
+                Buffer.BlockCopy(memBytes,1 + 2*12,varDims,0,4*4);
+                int nValues = 1;
+                for (int i = 0; i < 4; i++)
+                {
+                    nValues *= varDims[i];
+                }
+
+                nTimes = timesPresent ? varDims[0] : 0;
+                longTimes = new long[nTimes];
+                memBytes = new byte[(nTimes * 8) + (nValues * 4)];
+                // Read in all remaining data
+                reader.Read(memBytes);
+                dataArray = new float[varDims[0],varDims[3]];
                 if (timesPresent)
                 {
                     Buffer.BlockCopy(memBytes, 0, longTimes, 0, 8 * nTimes);

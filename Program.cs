@@ -30,10 +30,18 @@ internal class Program
         };
 
         DataSet ds = DataSet.Open(dsUri);
+        string outFile;
+        
         long[] longTimes = NetcdfSerializer.ReadFileTimes(ds);
+        // Start with latitude and longitude
+        outFile = string.Format(outName, "LAT1D");
+        NetcdfSerializer.SerializeVariable("lat", ds, outFile, null);
+        outFile = string.Format(outName, "LON1D");
+        NetcdfSerializer.SerializeVariable("lon", ds, outFile, null);
+        
         foreach (string varName in varNames)
         {
-            string outFile = string.Format(outName,varName);
+            outFile = string.Format(outName,varName);
             NetcdfSerializer.SerializeVariable(varName, ds, outFile, longTimes);
             
             /*
@@ -41,27 +49,23 @@ internal class Program
             int rank = NetcdfSerializer.GetRank(outFile);
             if (rank == 3)
             {
-                (DateTime[] timeVec, float[,,] data) = NetcdfSerializer.ReadFile2D(outFile);
+                (DateTime[] timeVec, float[,,] data) = NetcdfSerializer.Deserialize2D(outFile);
                 Console.WriteLine($"Match of {varName} for binary read: {CompareArrays(ds.GetData<float[,,]>(varName),data)}");
             }
             else if (rank == 4)
             {
-                (DateTime[] timeVec, float[,,,] data) = NetcdfSerializer.ReadFile3D(outFile);
+                (DateTime[] timeVec, float[,,,] data) = NetcdfSerializer.Deserialize3D(outFile);
                 float[,,,] ncData = ds.GetData<float[,,,]>(varName);
-                Console.WriteLine($"Match of {varName} for binary read: {CompareArrays3D(ncData,data)}");
+                Console.WriteLine($"Match of {varName} for binary read: {CompareArrays(ncData,data)}");
             }
             */
         }
     }
+
     public static bool CompareArrays(Array data1, Array data2)
     {
-        return Enumerable.Range(0,data1.Rank).All(dimension => data1.GetLength(dimension) == data2.GetLength(dimension)) && 
-               data1.Cast<float>().SequenceEqual(data2.Cast<float>());
-    }
-    
-    public static bool CompareArrays3D(float[,,,] data1, float[,,,] data2)
-    {
-        return Enumerable.Range(0,data1.Rank).All(dimension => data1.GetLength(dimension) == data2.GetLength(dimension)) && 
+        return Enumerable.Range(0, data1.Rank)
+                   .All(dimension => data1.GetLength(dimension) == data2.GetLength(dimension)) &&
                data1.Cast<float>().SequenceEqual(data2.Cast<float>());
     }
 }
