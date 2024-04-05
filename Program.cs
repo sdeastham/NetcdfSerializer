@@ -2,22 +2,51 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
 using Microsoft.Research.Science.Data;
 using Microsoft.Research.Science.Data.Imperative;
 using Microsoft.Research.Science.Data.NetCDF4;
 
 namespace SerializeNC;
+
 internal class Program
 {
     private static void Main(string[] args)
+    {
+        string baseDir = args[0];
+        DateTime startDate = DateTime.Parse(args[1]);
+        DateTime endDate = DateTime.Parse(args[2]);
+        Console.WriteLine(
+            $"Processing all days between {startDate} and {endDate} in {baseDir} assuming a MERRA-2 file structure.");
+        DateTime currDate = startDate;
+        string[] fileTypeList = ["A3dyn", "A3cld", "I3"];
+        FileProcessor processor = new FileProcessor(runTests: args.Length > 1 && args[1] == "test", internalPrint: false);
+        while (currDate < endDate)
+        {
+            Console.WriteLine($"Processing {currDate}...");
+            int year = currDate.Year;
+            int month = currDate.Month;
+            int day = currDate.Day;
+            foreach (string fileType in fileTypeList)
+            {
+                processor.ProcessFile([$"{year}/{month,2:d2}/MERRA2.{year}{month,2:d2}{day,2:d2}.{fileType}.05x0625.nc4"]);
+            }
+
+            currDate += TimeSpan.FromDays(1);
+        }
+    }
+}
+
+public class FileProcessor(bool runTests = false, bool internalPrint = true)
+{
+    public void ProcessFile(string[] args)
     {
         if (args.Length < 1)
         {
             throw new ArgumentException(
                 "Not enough arguments! Must provide input file.");
         }
-        const bool runTests = false;
         string ncFilename = args[0];
 
         string outName;
@@ -68,10 +97,15 @@ internal class Program
                 varNames[i] = args[i + 2];
             }
         }
-        Console.WriteLine($"Beginning serialization of {nVars} variables in {ncFilename}.");
-        Console.WriteLine($"Data will be stored in files with name {string.Format(outName,"VARIABLE")}.");
-        Console.WriteLine($"Longitudes and latitudes will be stored in {string.Format(outName,"LON1D")} (or LAT1D accordingly).");
-        
+
+        if (internalPrint)
+        {
+            Console.WriteLine($"Beginning serialization of {nVars} variables in {ncFilename}.");
+            Console.WriteLine($"Data will be stored in files with name {string.Format(outName, "VARIABLE")}.");
+            Console.WriteLine(
+                $"Longitudes and latitudes will be stored in {string.Format(outName, "LON1D")} (or LAT1D accordingly).");
+        }
+
         // Open the file
         NetCDFUri dsUri = new NetCDFUri
         {
