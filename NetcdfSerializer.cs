@@ -11,7 +11,7 @@ namespace SerializeNC;
 
 public static class NetcdfSerializer
 {
-    public static void SerializeVariable(string varName, DataSet ds, string outFile, long[] fileTimes)
+    public static void SerializeVariable(string varName, DataSet ds, string outFile, long[]? fileTimes=null)
     {
         ReadOnlyVariableCollection varList = ds.Variables;
         Variable targVar = varList.First(ncVar => ncVar.Name == varName);
@@ -31,6 +31,7 @@ public static class NetcdfSerializer
         }
         int nVals = (int)longLength;
         float[] data1D = new float[nVals];
+        int nTimes = fileTimes?.Length ?? 1;
         if (targVar.Rank == 4)
         {
             float[,,,] varData = ds.GetData<float[,,,]>(varName);
@@ -43,7 +44,7 @@ public static class NetcdfSerializer
         else if (targVar.Rank == 3)
         {
             float[,,] varData = ds.GetData<float[,,]>(varName);
-            varDims[0] = varData.GetLength(0); // Time
+            varDims[0] = nTimes;
             varDims[1] = 1; // Levels
             // Lat and Lon
             for (int i = 0; i < 2; i++)
@@ -53,24 +54,64 @@ public static class NetcdfSerializer
             Flatten(varData, varDims, data1D);
         }
         // Shove everything into a single block of bytes:
+        // 1 byte:      Flags [currently just 1: whether the time data is included]
         // 24 bytes:    a 12-character name
         // 16 bytes:    the array dimensions as four integers (first is assumed to be time)
-        // T * 8 bytes: T times, as seconds since 1970-01-01T00:00:00Z (long integers)
+        // T * 8 bytes: T times, as seconds since 1970-01-01T00:00:00Z (long integers) (if times given)
         // N * 4 byes:  N values, as floats
-        int nTimes = varDims[0];
-        string varShortName = varName.Length > 12 ? varName.Substring(0, 12) : varName.PadRight(12);
+        byte[] flags = CreateFlagsByte(fileTimes != null);
+        int flagBytes = 1;
+        int nameLength = 12;
+        int timeBytes = fileTimes?.Length * 8 ?? 0;
+        int nameBytes = 2 * nameLength;
+        int dimBytes = 4 * varDims.Length;
+        string varShortName = varName.Length > nameLength ? varName.Substring(0, nameLength) : varName.PadRight(nameLength);
         using (var stream = File.Open(outFile, FileMode.Create))
         {
             using (var writer = new BinaryWriter(stream, Encoding.Unicode))
             {
-                byte[] bigBlock = new byte[2 * 12 + 4 * 4 + 8 * nTimes + 4 * nVals];
-                Buffer.BlockCopy(Encoding.Unicode.GetBytes(varShortName),0,bigBlock,0,12*2);
-                Buffer.BlockCopy(varDims,0,bigBlock,12*2,4*4);
-                Buffer.BlockCopy(fileTimes,0,bigBlock,12*2 + 4*4,nTimes*8);
-                Buffer.BlockCopy(data1D,0,bigBlock,12*2 + 4*4 + nTimes*8,nVals*4);
+                byte[] bigBlock = new byte[flagBytes + nameBytes + dimBytes + timeBytes + (4*nVals)];
+                Buffer.BlockCopy(flags, 0, bigBlock, 0, flagBytes);
+                Buffer.BlockCopy(Encoding.Unicode.GetBytes(varShortName),0,bigBlock,flagBytes,nameBytes);
+                Buffer.BlockCopy(varDims,0,bigBlock,flagBytes + nameBytes,dimBytes);
+                if (timeBytes > 0)
+                {
+                    Buffer.BlockCopy(fileTimes,0,bigBlock,flagBytes + nameBytes + dimBytes,timeBytes);
+                }
+                Buffer.BlockCopy(data1D,0,bigBlock,flagBytes + nameBytes + dimBytes + timeBytes,nVals*4);
                 writer.Write(bigBlock);
             }
         }
+    }
+
+    private static byte[] CreateFlagsByte(bool includesTime)
+    {
+        byte flagsByte = new byte();
+        bool[] flags = new bool[8];
+        for (int i = 0; i < 8; i++)
+        {
+            flags[i] = false;
+        }
+        flags[7] = includesTime;
+        // Pack the bools, using the first bool as the least significant bit
+        for (int i = 0; i < 8; i++)
+        {
+            if (flags[i])
+            {
+                flagsByte |= (byte)(1 << i);
+            }
+        }
+        return [flagsByte];
+    }
+
+    private static bool[] ReadFlagsByte(byte flagsByte)
+    {
+        bool[] flags = new bool[8];
+        for (int i = 0; i < 8; i++)
+        {
+            flags[i] = (flagsByte & (1 << i)) != 0;
+        }
+        return flags;
     }
 
     private static void Flatten(Array varData, int[] varDims, float[] data1D)
@@ -174,22 +215,29 @@ public static class NetcdfSerializer
             using (var reader = new BinaryReader(stream, Encoding.Unicode))
             {
                 // Only read the header
-                byte[] memBytes = new byte[(12*2) + (4*4)];
+                byte[] memBytes = new byte[1 + (12*2) + (4*4)];
                 reader.Read(memBytes);
+                // Flag byte
+                bool[] flags = ReadFlagsByte(memBytes[0]);
+                bool timesPresent = flags[7];
                 // Skip the variable name - need to get the dimensions to know how far to read
-                Buffer.BlockCopy(memBytes,2*12,varDims,0,4*4);
+                Buffer.BlockCopy(memBytes,1 + 2*12,varDims,0,4*4);
                 int nValues = 1;
                 for (int i = 0; i < 4; i++)
                 {
                     nValues *= varDims[i];
                 }
-                nTimes = varDims[0];
+
+                nTimes = timesPresent ? varDims[0] : 0;
                 longTimes = new long[nTimes];
                 memBytes = new byte[(nTimes * 8) + (nValues * 4)];
                 // Read in all remaining data
                 reader.Read(memBytes);
                 dataArray = new float[varDims[0],varDims[2],varDims[3]];
-                Buffer.BlockCopy(memBytes, 0, longTimes, 0,8 * nTimes);
+                if (timesPresent)
+                {
+                    Buffer.BlockCopy(memBytes, 0, longTimes, 0, 8 * nTimes);
+                }
                 Buffer.BlockCopy(memBytes,nTimes*8,dataArray,0,4*nValues);
             }
         }
@@ -215,22 +263,29 @@ public static class NetcdfSerializer
             using (var reader = new BinaryReader(stream, Encoding.Unicode))
             {
                 // Only read the header
-                byte[] memBytes = new byte[(12*2) + (4*4)];
+                byte[] memBytes = new byte[1 + (12*2) + (4*4)];
                 reader.Read(memBytes);
+                // Flag byte
+                bool[] flags = ReadFlagsByte(memBytes[0]);
+                bool timesPresent = flags[7];
                 // Skip the variable name - need to get the dimensions to know how far to read
-                Buffer.BlockCopy(memBytes,2*12,varDims,0,4*4);
+                Buffer.BlockCopy(memBytes,1 + 2*12,varDims,0,4*4);
                 int nValues = 1;
                 for (int i = 0; i < 4; i++)
                 {
                     nValues *= varDims[i];
                 }
-                nTimes = varDims[0];
+
+                nTimes = timesPresent ? varDims[0] : 0;
                 longTimes = new long[nTimes];
                 memBytes = new byte[(nTimes * 8) + (nValues * 4)];
                 // Read in all remaining data
                 reader.Read(memBytes);
                 dataArray = new float[varDims[0],varDims[1],varDims[2],varDims[3]];
-                Buffer.BlockCopy(memBytes, 0, longTimes, 0,8 * nTimes);
+                if (timesPresent)
+                {
+                    Buffer.BlockCopy(memBytes, 0, longTimes, 0, 8 * nTimes);
+                }
                 Buffer.BlockCopy(memBytes,nTimes*8,dataArray,0,4*nValues);
             }
         }
