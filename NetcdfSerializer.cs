@@ -90,7 +90,6 @@ public static class NetcdfSerializer
                 }
                 Buffer.BlockCopy(data1D,0,bigBlock,flagBytes + nameBytes + dimBytes + timeBytes,nVals*4);
                 writer.Write(bigBlock);
-                Console.WriteLine($"FIRSTVAL --> {data1D[0]}");
             }
         }
     }
@@ -199,9 +198,9 @@ public static class NetcdfSerializer
             using (var reader = new BinaryReader(stream, Encoding.Unicode))
             {
                 // Only read the header
-                byte[] memBytes = new byte[(12*2) + (4*4)];
+                byte[] memBytes = new byte[1 + (12*2) + (4*4)];
                 reader.Read(memBytes);
-                Buffer.BlockCopy(memBytes,2*12,varDims,0,4*4);
+                Buffer.BlockCopy(memBytes,1 + 2*12,varDims,0,4*4);
             }
         }
         int rank = 0;
