@@ -20,9 +20,9 @@ internal class Program
         }
         Console.WriteLine($"Beginning serialization of {nVars} variables in {ncFilename}.");
         Console.WriteLine($"Data will be stored in files with name {string.Format(outName,"VARIABLE")}.");
+        Console.WriteLine($"Longitudes and latitudes will be stored in {string.Format(outName,"LON1D")} (or LAT1D accordingly).");
         
         // Open the file
-        //string testFilename = "C:/Data/MERRA-2/2023/01/MERRA2.20230101.A3dyn.05x0625.nc4";
         NetCDFUri dsUri = new NetCDFUri
         {
             FileName = ncFilename,
@@ -34,7 +34,8 @@ internal class Program
         foreach (string varName in varNames)
         {
             string outFile = string.Format(outName,varName);
-            NetcdfSerializer.SerializeToFile(varName, ds, outFile, longTimes);
+            NetcdfSerializer.SerializeVariable(varName, ds, outFile, longTimes);
+            
             /*
             // Now read in the data.. is it the same?
             int rank = NetcdfSerializer.GetRank(outFile);
@@ -48,8 +49,6 @@ internal class Program
                 (DateTime[] timeVec, float[,,,] data) = NetcdfSerializer.ReadFile3D(outFile);
                 float[,,,] ncData = ds.GetData<float[,,,]>(varName);
                 Console.WriteLine($"Match of {varName} for binary read: {CompareArrays3D(ncData,data)}");
-                Console.WriteLine($"{ncData[0,0,0,0]}, {data[0,0,0,0]}");
-                Console.WriteLine($"{ncData[7,71,360,575]}, {data[7,71,360,575]}");
             }
             */
         }

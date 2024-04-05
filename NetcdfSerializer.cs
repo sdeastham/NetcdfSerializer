@@ -11,7 +11,7 @@ namespace SerializeNC;
 
 public static class NetcdfSerializer
 {
-    public static void SerializeToFile(string varName, DataSet ds, string outFile, long[] fileTimes)
+    public static void SerializeVariable(string varName, DataSet ds, string outFile, long[] fileTimes)
     {
         ReadOnlyVariableCollection varList = ds.Variables;
         Variable targVar = varList.First(ncVar => ncVar.Name == varName);
@@ -73,7 +73,7 @@ public static class NetcdfSerializer
         }
     }
 
-    private static float[] Flatten(Array varData, int[] varDims, float[] data1D)
+    private static void Flatten(Array varData, int[] varDims, float[] data1D)
     {
         if (varData.LongLength > Int32.MaxValue)
         {
@@ -85,7 +85,6 @@ public static class NetcdfSerializer
             nVals *= varDims[i];
         }
         Buffer.BlockCopy(varData, 0, data1D, 0, nVals*4);
-        return data1D;
     }
 
     public static long[] ReadFileTimes(DataSet ds)
