@@ -77,7 +77,7 @@ public class FileProcessor(bool runTests = false, bool internalPrint = true)
             }
             else if (shortName.Contains("A3cld"))
             {
-                varNames = ["QI", "QL"];
+                varNames = ["CLOUD","QI", "QL"];
             }
             else if (shortName.Contains("I3"))
             {
