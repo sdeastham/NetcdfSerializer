@@ -79,9 +79,7 @@ public static class NetcdfSerializer
         int timeBytes = fileTimes?.Length * 8 ?? 0;
         int nameBytes = 2 * nameLength;
         int dimBytes = 4 * varDims.Length;
-        string varShortName = varName.Length > nameLength
-            ? varName.Substring(0, nameLength)
-            : varName.PadRight(nameLength);
+        string varShortName = PrepareVariableName(varName, nameLength);
         using (var stream = File.Open(outFile, FileMode.Create))
         {
             using (var writer = new BinaryWriter(stream, Encoding.Unicode))
@@ -94,11 +92,15 @@ public static class NetcdfSerializer
                 {
                     Buffer.BlockCopy(fileTimes, 0, bigBlock, flagBytes + nameBytes + dimBytes, timeBytes);
                 }
-
                 Buffer.BlockCopy(data1D, 0, bigBlock, flagBytes + nameBytes + dimBytes + timeBytes, nVals * 4);
                 writer.Write(bigBlock);
             }
         }
+    }
+
+    public static string PrepareVariableName(string varName, int nameLength=12)
+    {
+        return varName.Length > nameLength ? varName.Substring(0, nameLength) : varName.PadRight(nameLength);
     }
 
     public static void SerializeTime(string outFile, long[] longTimes)
@@ -346,12 +348,125 @@ public static class NetcdfSerializer
                 longTimes = new long[nTimes];
                 // Only read the header
                 byte[] memBytes = new byte[8*nTimes];
-                reader.Read(memBytes);
+                //reader.Read(memBytes); // Why was this duplicated?
                 reader.Read(memBytes);
                 Buffer.BlockCopy(memBytes, 0, longTimes, 0, 8 * nTimes);
             }
         }
         return LongTimesToDateTimes(longTimes);
+    }
+
+    private static readonly string[] LevelNameOptions = ["lev", "level", "levs", "levels"];
+
+    public static void SerializeDimensions(DataSet ds, string fileName, long[]? longTimes)
+    {
+        float[] lons = ds.GetData<float[]>("lon");
+        float[] lats = ds.GetData<float[]>("lat");
+        int nLevels =
+            (from levName in LevelNameOptions
+                where ds.Variables.Contains(levName)
+                select ds.GetData<float[]>(levName).Length).FirstOrDefault();
+        int[]? levVec = nLevels > 0 ? new[] { nLevels } : null;
+        
+        using (var stream = File.Open(fileName, FileMode.Create))
+        {
+            using (var writer = new BinaryWriter(stream, Encoding.Unicode))
+            {
+                Write1DVector(writer,longTimes,8,"TIME");
+                Write1DVector(writer,levVec,4,"LEVELS");
+                Write1DVector(writer,lats,4,"LAT1D");
+                Write1DVector(writer,lons,4,"LON1D");
+            }
+        }
+    }
+
+    private static void Write1DVector(BinaryWriter writer, Array? vec, int varSize, string varName)
+    {
+        int vecLen = vec?.Length ?? 0;
+        // Record variable name, number of values, and then the variable itself
+        byte[] memBytes = new byte[12 * 2 + 1 * 4 + vecLen * varSize];
+        Buffer.BlockCopy(Encoding.Unicode.GetBytes(PrepareVariableName(varName)), 0, memBytes, 0, 12 * 2);
+        int[] intVec = [vecLen];
+        Buffer.BlockCopy(intVec, 0, memBytes, 12 * 2, 4);
+        if (vec != null)
+        {
+            Buffer.BlockCopy(vec, 0, memBytes, 12 * 2 + 4, vecLen * varSize);
+        }
+        writer.Write(memBytes);
+    }
+    public static (DateTime[]?, int?, float[]?, float[]?, bool[]) DeserializeDimensions(string fileName)
+    {
+        float[]? lons = null;
+        float[]? lats = null;
+        int? nLevels = null;
+        DateTime[]? timeVec = null;
+        bool[] dimsFound = new bool[4];
+        for (int i = 0; i < 4; i++)
+        {
+            dimsFound[i] = false;
+        }
+        using (var stream = File.Open(fileName, FileMode.Open))
+        {
+            using (var reader = new BinaryReader(stream, Encoding.Unicode))
+            {
+                // Read in variable name and number of entries
+                byte[] memBytes;
+                char[] varName = new char[12];
+                int[] intVec = new int[1];
+                // Loop until we reach end of file
+                while (true)
+                {
+                    memBytes = new byte[(12 * 2) + 4];
+                    // Read in the data - or break if at EOF
+                    if (reader.Read(memBytes) == 0) { break; }
+                    Buffer.BlockCopy(memBytes, 0, varName, 0, 12 * 2);
+                    Buffer.BlockCopy(memBytes, 12 * 2, intVec, 0, 4);
+                    int nEntries = intVec[0];
+                    string varString = new string(varName).TrimEnd();
+                    //Console.WriteLine($"{varString} has {nEntries} entries");
+                    switch (varString)
+                    {
+                        case "TIME":
+                            dimsFound[0] = true;
+                            if (nEntries == 0) { break; }
+                            long[] longTimes = new long[nEntries];
+                            memBytes = new byte[nEntries * 8];
+                            reader.Read(memBytes);
+                            Buffer.BlockCopy(memBytes,0,longTimes,0,nEntries*8);
+                            timeVec = LongTimesToDateTimes(longTimes);
+                            break;
+                        case "LEVELS":
+                            dimsFound[1] = true;
+                            if (nEntries == 0) { break; }
+                            memBytes = new byte[4];
+                            reader.Read(memBytes);
+                            Buffer.BlockCopy(memBytes, 0, intVec, 0, 4);
+                            nLevels = intVec[0];
+                            break;
+                        case "LAT1D":
+                            dimsFound[2] = true;
+                            if (nEntries == 0) { break; }
+                            memBytes = new byte[nEntries * 4];
+                            reader.Read(memBytes);
+                            lats = new float[nEntries];
+                            Buffer.BlockCopy(memBytes, 0, lats, 0, 4 * nEntries);
+                            break;
+                        case "LON1D":
+                            dimsFound[3] = true;
+                            if (nEntries == 0) { break; }
+                            memBytes = new byte[nEntries * 4];
+                            reader.Read(memBytes);
+                            lons = new float[nEntries];
+                            Buffer.BlockCopy(memBytes, 0, lons, 0, 4 * nEntries);
+                            break;
+                        default:
+                            throw new InvalidOperationException(
+                                $"Dimension {varString} not recognized during deserialization.");
+                    }
+                }
+            }
+        }
+        return (timeVec, nLevels, lats, lons, dimsFound);
     }
 
     public static float[] Deserialize1DNoTime(string fileName)

@@ -103,7 +103,7 @@ public class FileProcessor(bool runTests = false, bool internalPrint = true)
             Console.WriteLine($"Beginning serialization of {nVars} variables in {ncFilename}.");
             Console.WriteLine($"Data will be stored in files with name {string.Format(outName, "VARIABLE")}.");
             Console.WriteLine(
-                $"Longitudes and latitudes will be stored in {string.Format(outName, "LON1D")} (or LAT1D accordingly).");
+                $"Dimensions will be stored in {string.Format(outName, "DIMENSIONS")}.");
         }
 
         // Open the file
@@ -118,12 +118,16 @@ public class FileProcessor(bool runTests = false, bool internalPrint = true)
         
         long[] longTimes = NetcdfSerializer.ReadFileTimes(ds);
         // Start with dimensions: times, latitude, and longitude
+        outFile = string.Format(outName, "DIMENSIONS");
+        NetcdfSerializer.SerializeDimensions(ds, outFile, longTimes);
+        /*
         outFile = string.Format(outName, "TIME");
         NetcdfSerializer.SerializeTime(outFile, longTimes);
         outFile = string.Format(outName, "LAT1D");
         NetcdfSerializer.SerializeVariable("lat", ds, outFile, null);
         outFile = string.Format(outName, "LON1D");
         NetcdfSerializer.SerializeVariable("lon", ds, outFile, null);
+        */
 
         Stopwatch writeTimer = new Stopwatch();
         Stopwatch ncReadTimer = new Stopwatch();
