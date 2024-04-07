@@ -11,7 +11,7 @@ namespace SerializeNC;
 
 public static class NetcdfSerializer
 {
-    public static void SerializeVariable(string varName, DataSet ds, string outFile, long[]? fileTimes=null)
+    public static void SerializeVariable(string varName, DataSet ds, string outFile, long[]? fileTimes = null)
     {
         ReadOnlyVariableCollection varList = ds.Variables;
         Variable targVar = varList.First(ncVar => ncVar.Name == varName);
@@ -19,16 +19,17 @@ public static class NetcdfSerializer
         {
             throw new ArgumentException($"Variable {varName} not found in dataset {ds.URI}");
         }
-        
+
         // Read in all data for this variable and flatten it into a 1-D array
         int[] varDims = new int[4];
         // How many values will we need to write?
         long longLength = targVar.TotalLength();
         // Verify that we will be able to create a 1D block array with this many bytes..
-        if ((longLength*4) > int.MaxValue - 500)
+        if ((longLength * 4) > int.MaxValue - 500)
         {
             throw new NotImplementedException($"Too many values ({longLength}) for single-block read/write.");
         }
+
         int nVals = (int)longLength;
         float[] data1D = new float[nVals];
         int nTimes = fileTimes?.Length ?? 1;
@@ -39,6 +40,7 @@ public static class NetcdfSerializer
             {
                 varDims[i] = varData.GetLength(i);
             }
+
             Flatten(varData, varDims, data1D);
         }
         else if (targVar.Rank == 3)
@@ -51,18 +53,20 @@ public static class NetcdfSerializer
             {
                 varDims[i + 2] = varData.GetLength(i + 1);
             }
+
             Flatten(varData, varDims, data1D);
         }
         else if ((targVar.Rank == 1) && (fileTimes == null))
         {
             float[] varData = ds.GetData<float[]>(varName);
-            varDims = [1,1,1,varData.Length];
+            varDims = [1, 1, 1, varData.Length];
             Flatten(varData, varDims, data1D);
         }
         else
         {
             throw new ArgumentException($"Code not in place for a variable of rank {targVar.Rank}");
         }
+
         // Shove everything into a single block of bytes:
         // 1 byte:      Flags [currently just 1: whether the time data is included]
         // 24 bytes:    a 12-character name
@@ -75,20 +79,42 @@ public static class NetcdfSerializer
         int timeBytes = fileTimes?.Length * 8 ?? 0;
         int nameBytes = 2 * nameLength;
         int dimBytes = 4 * varDims.Length;
-        string varShortName = varName.Length > nameLength ? varName.Substring(0, nameLength) : varName.PadRight(nameLength);
+        string varShortName = varName.Length > nameLength
+            ? varName.Substring(0, nameLength)
+            : varName.PadRight(nameLength);
         using (var stream = File.Open(outFile, FileMode.Create))
         {
             using (var writer = new BinaryWriter(stream, Encoding.Unicode))
             {
-                byte[] bigBlock = new byte[flagBytes + nameBytes + dimBytes + timeBytes + (4*nVals)];
+                byte[] bigBlock = new byte[flagBytes + nameBytes + dimBytes + timeBytes + (4 * nVals)];
                 Buffer.BlockCopy(flags, 0, bigBlock, 0, flagBytes);
-                Buffer.BlockCopy(Encoding.Unicode.GetBytes(varShortName),0,bigBlock,flagBytes,nameBytes);
-                Buffer.BlockCopy(varDims,0,bigBlock,flagBytes + nameBytes,dimBytes);
+                Buffer.BlockCopy(Encoding.Unicode.GetBytes(varShortName), 0, bigBlock, flagBytes, nameBytes);
+                Buffer.BlockCopy(varDims, 0, bigBlock, flagBytes + nameBytes, dimBytes);
                 if (timeBytes > 0)
                 {
-                    Buffer.BlockCopy(fileTimes,0,bigBlock,flagBytes + nameBytes + dimBytes,timeBytes);
+                    Buffer.BlockCopy(fileTimes, 0, bigBlock, flagBytes + nameBytes + dimBytes, timeBytes);
                 }
-                Buffer.BlockCopy(data1D,0,bigBlock,flagBytes + nameBytes + dimBytes + timeBytes,nVals*4);
+
+                Buffer.BlockCopy(data1D, 0, bigBlock, flagBytes + nameBytes + dimBytes + timeBytes, nVals * 4);
+                writer.Write(bigBlock);
+            }
+        }
+    }
+
+    public static void SerializeTime(string outFile, long[] longTimes)
+    {
+        // Time file is very simple - just the number of times, followed by a vector of them as long integers
+        // (seconds since 1970-01-01 00:00:00)
+        int nTimes = longTimes.Length;
+        int timeBytes = 8 * nTimes;
+        using (var stream = File.Open(outFile, FileMode.Create))
+        {
+            using (var writer = new BinaryWriter(stream, Encoding.Unicode))
+            {
+                byte[] bigBlock = new byte[4 + timeBytes];
+                int[] nTimesArr = [nTimes];
+                Buffer.BlockCopy(nTimesArr, 0, bigBlock, 0, 4);
+                Buffer.BlockCopy(longTimes, 0, bigBlock, 4, timeBytes);
                 writer.Write(bigBlock);
             }
         }
@@ -251,17 +277,22 @@ public static class NetcdfSerializer
                 Buffer.BlockCopy(memBytes,nTimes*8,dataArray,0,4*nValues);
             }
         }
+        return (LongTimesToDateTimes(longTimes), dataArray);
+    }
 
-        // Convert from longTimes to timeVec
+    private static DateTime[] LongTimesToDateTimes(long[] longTimes)
+    {
+        int nTimes = longTimes.Length;
         DateTime[] timeVec = new DateTime[nTimes];
         DateTime refTime = new DateTime(1970, 1, 1, 0, 0, 0);
         for (int i = 0; i < nTimes; i++)
         {
             timeVec[i] = refTime + TimeSpan.FromSeconds((double)longTimes[i]);
         }
-        return (timeVec, dataArray);
+
+        return timeVec;
     }
-    
+
     public static (DateTime[], float[,,,]) Deserialize3D(string fileName)
     {
         int[] varDims = new int[4];
@@ -299,15 +330,28 @@ public static class NetcdfSerializer
                 Buffer.BlockCopy(memBytes,nTimes*8,dataArray,0,4*nValues);
             }
         }
+        return (LongTimesToDateTimes(longTimes), dataArray);
+    }
 
-        // Convert from longTimes to timeVec
-        DateTime[] timeVec = new DateTime[nTimes];
-        DateTime refTime = new DateTime(1970, 1, 1, 0, 0, 0);
-        for (int i = 0; i < nTimes; i++)
+    public static DateTime[] DeserializeTime(string fileName)
+    {
+        long[] longTimes;
+        using (var stream = File.Open(fileName, FileMode.Open))
         {
-            timeVec[i] = refTime + TimeSpan.FromSeconds((double)longTimes[i]);
+            using (var reader = new BinaryReader(stream, Encoding.Unicode))
+            {
+                // Read in number of times (int)
+                int nTimes;
+                nTimes = reader.ReadInt32();
+                longTimes = new long[nTimes];
+                // Only read the header
+                byte[] memBytes = new byte[8*nTimes];
+                reader.Read(memBytes);
+                reader.Read(memBytes);
+                Buffer.BlockCopy(memBytes, 0, longTimes, 0, 8 * nTimes);
+            }
         }
-        return (timeVec, dataArray);
+        return LongTimesToDateTimes(longTimes);
     }
 
     public static float[] Deserialize1DNoTime(string fileName)
@@ -354,14 +398,6 @@ public static class NetcdfSerializer
                 Buffer.BlockCopy(memBytes,nTimes*8,dataArray,0,4*nValues);
             }
         }
-
-        // Convert from longTimes to timeVec
-        DateTime[] timeVec = new DateTime[nTimes];
-        DateTime refTime = new DateTime(1970, 1, 1, 0, 0, 0);
-        for (int i = 0; i < nTimes; i++)
-        {
-            timeVec[i] = refTime + TimeSpan.FromSeconds((double)longTimes[i]);
-        }
-        return (timeVec, dataArray);
+        return (LongTimesToDateTimes(longTimes), dataArray);
     }
 }

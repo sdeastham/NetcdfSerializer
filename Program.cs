@@ -117,7 +117,9 @@ public class FileProcessor(bool runTests = false, bool internalPrint = true)
         string outFile;
         
         long[] longTimes = NetcdfSerializer.ReadFileTimes(ds);
-        // Start with latitude and longitude
+        // Start with dimensions: times, latitude, and longitude
+        outFile = string.Format(outName, "TIME");
+        NetcdfSerializer.SerializeTime(outFile, longTimes);
         outFile = string.Format(outName, "LAT1D");
         NetcdfSerializer.SerializeVariable("lat", ds, outFile, null);
         outFile = string.Format(outName, "LON1D");
