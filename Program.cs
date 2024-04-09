@@ -14,6 +14,10 @@ internal class Program
 {
     private static void Main(string[] args)
     {
+        if (args.Length < 3)
+        { 
+            throw new ArgumentOutOfRangeException("Need 3 arguments: base directory, start date, and end date");
+        }
         string baseDir = args[0];
         DateTime startDate = DateTime.Parse(args[1]);
         DateTime endDate = DateTime.Parse(args[2]);
