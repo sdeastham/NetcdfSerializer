@@ -30,7 +30,7 @@ internal class Program
             int day = currDate.Day;
             foreach (string fileType in fileTypeList)
             {
-                processor.ProcessFile([$"{year}/{month,2:d2}/MERRA2.{year}{month,2:d2}{day,2:d2}.{fileType}.05x0625.nc4"]);
+                processor.ProcessFile([$"{baseDir}/{year}/{month,2:d2}/MERRA2.{year}{month,2:d2}{day,2:d2}.{fileType}.05x0625.nc4"]);
             }
 
             currDate += TimeSpan.FromDays(1);
