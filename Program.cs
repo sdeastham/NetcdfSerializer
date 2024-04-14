@@ -58,7 +58,7 @@ public class FileProcessor(bool runTests = false, bool internalPrint = true)
         {
             if (ncFilename.Contains(".05x0625"))
             {
-                outName = ncFilename.Replace(".05x0625", ".{0}.05x0625");
+                outName = ncFilename.Replace(".05x0625.nc4", ".{0}.05x0625.serial");
             }
             else
             {
